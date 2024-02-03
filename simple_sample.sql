@@ -104,7 +104,8 @@ CREATE TABLE `evaluation` (
 LOCK TABLES `evaluation` WRITE;
 /*!40000 ALTER TABLE `evaluation` DISABLE KEYS */;
 INSERT INTO `evaluation` VALUES
-(38,1,1,1);
+(38,1,1,1),
+(2,1,1,0);
 /*!40000 ALTER TABLE `evaluation` ENABLE KEYS */;
 UNLOCK TABLES;
 
