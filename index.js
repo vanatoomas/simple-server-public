@@ -49,6 +49,20 @@ const withErrorHandling = (handler) => async (req, res) => {
   }
 };
 
+function getCurrentTime() {
+  const date = new Date();
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+
+  const formattedDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  return formattedDate;
+}
+
 app.get(
   "/api/users",
   withErrorHandling(async (req, res) => {
@@ -124,7 +138,7 @@ app.get(
     const { evaluationPeriodId } = req.query;
     const result = await connectDatabase(async (connection) => {
       return await connection.query(`SELECT fk_user
-                                   FROM evaluation
+                                   FROM evaluation_stakeholders
                                    WHERE fk_period = ${evaluationPeriodId};`);
     });
     res.send(result.map((evaluation) => evaluation.fk_user));
@@ -140,8 +154,12 @@ app.post(
       .map((value) => `(${value.join(",")})`)
       .join(",");
     await connectDatabase(async (connection) => {
-      await connection.query(`INSERT INTO evaluation (fk_period, fk_user)
-                            VALUES ${formattedValues}`);
+      await connection.query(
+        `DELETE FROM evaluation_stakeholders WHERE fk_period = ?`,
+        [evaluationPeriodId]
+      );
+      await connection.query(`INSERT INTO evaluation_stakeholders (fk_period, fk_user)
+                              VALUES ${formattedValues}`);
     });
     res.send();
   })
@@ -209,6 +227,14 @@ app.post(
       .map((value) => `(${value.join(",")})`)
       .join(",");
     await connectDatabase(async (connection) => {
+      const evaluationProcessIds = [
+        ...new Set(values.map((value) => value[0])),
+      ];
+      const placeholders = evaluationProcessIds.map(() => "?").join(",");
+      await connection.query(
+        `DELETE FROM evaluation_process_data_type WHERE fk_evaluation_process IN (${placeholders})`,
+        evaluationProcessIds
+      );
       await connection.query(`INSERT INTO evaluation_process_data_type (fk_evaluation_process, fk_data_type)
                             VALUES ${formattedValues}`);
     });
@@ -431,41 +457,40 @@ app.get(
   withErrorHandling(async (req, res) => {
     const response = await connectDatabase(async (connection) => {
       return await connection.query(
-        "SELECT id, fk_user as user, completed, eval_name as evalName, date_created as createdTime FROM evaluation;"
+        `SELECT e.id, e.fk_user as user, e.completed, e.eval_name as evalName, ep.date_start as createdTime, ep.date_end as endTime 
+        FROM evaluation e
+        INNER JOIN evaluation_period ep ON e.fk_period = ep.id;`
       );
     });
     res.send(response);
   })
 );
 
-function getCurrentTime() {
-  const date = new Date();
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-
-  const formattedDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  return formattedDate;
-}
-
 app.post(
   "/api/evaluation",
   withErrorHandling(async (req, res) => {
     const { userId, evalName } = req.body;
     const currentTime = getCurrentTime();
-    let response;
+    let evalResponse;
     await connectDatabase(async (connection) => {
-      response = await connection.query(
-        `INSERT INTO evaluation (fk_user, fk_period, completed, eval_name, date_created)
-      VALUES (?, 1, 0, ?, ?)`,
-        [userId, evalName, currentTime]
+      const evalPeriodResponse = await connection.query(
+        `INSERT INTO evaluation_period (date_start)
+      VALUES (?)`,
+        [currentTime]
+      );
+      const { insertId } = evalPeriodResponse;
+      evalResponse = await connection.query(
+        `INSERT INTO evaluation (fk_user, fk_period, completed, eval_name)
+      VALUES (?, ?, 0, ?)`,
+        [userId, insertId, evalName]
+      );
+      await connection.query(
+        `INSERT INTO evaluation_stakeholders (fk_user, fk_period)
+      VALUES (?, ?)`,
+        [userId, insertId]
       );
     });
-    res.send({ evaluationId: response.insertId });
+    res.send({ evaluationId: evalResponse.insertId });
   })
 );
 
