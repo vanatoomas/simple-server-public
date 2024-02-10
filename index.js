@@ -294,6 +294,7 @@ app.post(
   withErrorHandling(async (req, res) => {
     const { evaluationId, scores } = req.body;
     const evaluations = [];
+    const currentTime = getCurrentTime();
     Object.keys(scores).forEach((criteriaId) => {
       const criteriaDataTypeScores = scores[criteriaId];
       const dataTypeIds = Object.keys(criteriaDataTypeScores);
@@ -315,6 +316,12 @@ app.post(
       await connection.query(`UPDATE evaluation
                             SET completed = 1
                             WHERE id = ${evaluationId};`);
+      await connection.query(
+        `UPDATE evaluation_period
+      SET date_end = ?
+      WHERE id = (SELECT fk_period FROM evaluation WHERE id = ?)`,
+        [currentTime, evaluationId]
+      );
     });
     res.send();
   })
@@ -442,11 +449,12 @@ app.post(
       action.userId,
     ]);
     await connectDatabase(async (connection) => {
-      await connection.query(
-        `INSERT INTO evaluation_action (activity, fk_period, fk_user)
-                            VALUES ?`,
-        [values]
-      );
+      for (let value of values) {
+        await connection.query(
+          `INSERT INTO evaluation_action (activity, fk_period, fk_user) VALUES (?, ?, ?)`,
+          value
+        );
+      }
     });
     res.send();
   })
@@ -491,6 +499,46 @@ app.post(
       );
     });
     res.send({ evaluationId: evalResponse.insertId });
+  })
+);
+
+app.get(
+  "/api/tools",
+  withErrorHandling(async (req, res) => {
+    const response = await connectDatabase(async (connection) => {
+      return await connection.query("SELECT id, name FROM tool;");
+    });
+    res.send(response);
+  })
+);
+
+app.get(
+  "/api/evaluation/tools",
+  withErrorHandling(async (req, res) => {
+    const { evaluationId } = req.query;
+    const response = await connectDatabase(async (connection) => {
+      return await connection.query(`SELECT t.id, t.name
+                                   FROM tool t
+                                            JOIN evaluation_tools et ON t.id = et.fk_tool_id
+                                   WHERE et.fk_evaluation_id = ${evaluationId};`);
+    });
+    res.send(response);
+  })
+);
+
+app.post(
+  "/api/evaluation/tools",
+  withErrorHandling(async (req, res) => {
+    const { evaluationId, tools } = req.body;
+    const values = tools.map((toolId) => [evaluationId, toolId]);
+    const formattedValues = values
+      .map((value) => `(${value.join(",")})`)
+      .join(",");
+    await connectDatabase(async (connection) => {
+      await connection.query(`INSERT INTO evaluation_tools (fk_evaluation_id, fk_tool_id)
+                            VALUES ${formattedValues}`);
+    });
+    res.send();
   })
 );
 
